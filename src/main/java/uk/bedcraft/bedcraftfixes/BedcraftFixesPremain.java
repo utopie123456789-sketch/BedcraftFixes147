@@ -1,11 +1,14 @@
 package uk.bedcraft.bedcraftfixes;
 
+import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.Supplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -24,6 +27,8 @@ public class BedcraftFixesPremain implements Runnable {
 
 	public static final List<String> transformerTargets = new ArrayList<>();
 
+	private static final String TT_CLASS_RESOURCE = "nallar/tickthreading/minecraft/TickThreading.class";
+
 	public boolean bukkitServer;
 
 	public boolean tickThreading;
@@ -37,10 +42,37 @@ public class BedcraftFixesPremain implements Runnable {
 	}
 
 	private boolean hasTickThreading() {
-		try {
-			Class.forName("nallar.tickthreading.minecraft.TickThreading");
-			return true;
-		} catch (ClassNotFoundException ignored) {}
+		// TickThreading is a coremod: FML only puts its jar on the classpath when it loads mods,
+		// which happens long after this entrypoint runs, so Class.forName can't find it here.
+		if (canSeeResource(TT_CLASS_RESOURCE)) return true;
+		return anyJarContains(new File("mods"), TT_CLASS_RESOURCE);
+	}
+
+	private static boolean canSeeResource(String resource) {
+		for (ClassLoader cl : new ClassLoader[] {
+				Thread.currentThread().getContextClassLoader(),
+				BedcraftFixesPremain.class.getClassLoader()}) {
+			for (ClassLoader c = cl; c != null; c = c.getParent()) {
+				if (c.getResource(resource) != null) return true;
+			}
+		}
+		return ClassLoader.getSystemResource(resource) != null;
+	}
+
+	private static boolean anyJarContains(File dir, String entry) {
+		File[] files = dir.listFiles();
+		if (files == null) return false;
+		for (File f : files) {
+			if (!f.isFile()) continue;
+			String name = f.getName().toLowerCase(Locale.ROOT);
+			if (!name.endsWith(".jar") && !name.endsWith(".zip")) continue;
+			try (ZipFile zip = new ZipFile(f)) {
+				if (zip.getEntry(entry) != null) {
+					log.debug("Found {} in {}", entry, f.getName());
+					return true;
+				}
+			} catch (IOException ignored) {}
+		}
 		return false;
 	}
 
